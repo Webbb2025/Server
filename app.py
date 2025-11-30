@@ -12,6 +12,7 @@ import json
 import traceback
 import re
 
+
 # ---------------- CONFIG ----------------
 TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
 CHAT_ID = "-1002428790704"
