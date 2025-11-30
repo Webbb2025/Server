@@ -25,11 +25,12 @@ HISTORIAL_FILE = "enviados_historial.json"
 NO_REPEAT_DAYS = 15  # NO repetir el mismo producto en 15 días
 
 PALABRAS_CLAVE = [
-    "Electrónica",
-    "Fire TV",
-    "Echo",
-    "Xiaomi",
-    "Belleza"
+"Hogar",
+"ropa",
+"juguetes",
+"juegos",
+"bebé",
+"deporte"
 ]
 
 HEADERS_ROTATIVOS = [
