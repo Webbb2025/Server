@@ -311,8 +311,8 @@ def main_loop():
                     time.sleep(10 * 60)
             if productos_encontrados:
                 deduplicar_y_guardar(productos_encontrados)
-            log("⏳ Ciclo terminado. Esperando 10 minutos...\n")
-            time.sleep(10 * 60)
+            log("⏳ Ciclo terminado. Esperando 9 minutos...\n")
+            time.sleep(9 * 60)
         except KeyboardInterrupt:
             log("Interrupción por teclado")
             break
