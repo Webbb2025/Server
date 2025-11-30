@@ -307,8 +307,8 @@ def main_loop():
                     enviar_telegram(p)
                     registrar_envio(p["asin"], historial)
                     productos_encontrados.append(p)
-                    log("⏳ Esperando 10 minutos antes del siguiente envío...")
-                    time.sleep(10 * 60)
+                    log("⏳ Esperando 9 minutos antes del siguiente envío...")
+                    time.sleep(9 * 60)
             if productos_encontrados:
                 deduplicar_y_guardar(productos_encontrados)
             log("⏳ Ciclo terminado. Esperando 9 minutos...\n")
