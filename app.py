@@ -79,7 +79,7 @@ def fue_enviado_recientemente(asin, historial):
 
 def registrar_envio(asin, historial):
     historial[asin] = datetime.now().isoformat()
-    guardar_historial(hist)
+    guardar_historial(historial)
 
 def extract_asin(url):
     try:
