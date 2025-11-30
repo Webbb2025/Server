@@ -12,18 +12,19 @@ import json
 import traceback
 import re
 
+
+
 # ---------------- CONFIG ----------------
 TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
 CHAT_ID = "-1002428790704"
 TAG = "crt06f-21"
-
 
 EXCEL_FILE = "productos.xlsx"
 LOG_FILE = "log.txt"
 
 ENVIADOS_DIR = "enviados"
 HISTORIAL_FILE = "enviados_historial.json"
-NO_REPEAT_DAYS = 15  # NO repetir el mismo producto en 15 días
+NO_REPEAT_DAYS = 15
 
 PALABRAS_CLAVE = [
     "Hogar",
@@ -51,7 +52,7 @@ def log(msg):
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-    except Exception:
+    except:
         pass
 
 def ensure_dirs():
@@ -91,14 +92,11 @@ def registrar_envio(asin, historial):
 def extract_asin(url):
     try:
         m = re.search(r"/dp/([A-Z0-9]{10})", url)
-        if m:
-            return m.group(1)
+        if m: return m.group(1)
         m = re.search(r"/gp/product/([A-Z0-9]{10})", url)
-        if m:
-            return m.group(1)
+        if m: return m.group(1)
         m = re.search(r"/([A-Z0-9]{10})(?:[/?]|$)", url)
-        if m:
-            return m.group(1)
+        if m: return m.group(1)
     except:
         return None
     return None
@@ -134,86 +132,46 @@ def scraperapi_get(url):
 def parse_number_like_amazon(text):
     if not text:
         return None
-    text = text.replace("\xa0", "").replace("\u202f", "").strip()
-    patterns = [
-        r"\d{1,3}(?:[.\s]\d{3})*,\d{1,2}",
-        r"\d+(?:,\d{1,2})",
-        r"\d{1,3}(?:[.\s]\d{3})+",
-        r"\d+"
-    ]
-    for pat in patterns:
-        m = re.search(pat, text)
-        if m:
-            raw = m.group(0).replace(" ", "").replace(".", "").replace(",", ".")
-            try:
-                return float(raw)
-            except:
-                continue
-    return None
+    text = text.replace("\xa0", "").replace("\u202f", "").replace("€","").strip()
+    text = text.replace(",", ".")
+    try:
+        return float(re.findall(r"[\d\.]+", text)[0])
+    except:
+        return None
 
 def extraer_precios(soup):
-    precio_actual = None
-    precio_anterior = None
+    # Precio actual
+    precio_actual_tag = soup.select_one(".aok-offscreen")
+    precio_actual = parse_number_like_amazon(precio_actual_tag.get_text(strip=True)) if precio_actual_tag else None
 
-    selectores_actual = [
-        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
-        "#corePrice_feature_div .a-price .a-offscreen",
-        "span[data-a-color='price'] span.a-offscreen",
-        "#price_inside_buybox",
-        "#newBuyBoxPrice"
-    ]
-    for sel in selectores_actual:
-        tag = soup.select_one(sel)
-        if tag:
-            precio_actual = parse_number_like_amazon(tag.get_text(" ", strip=True))
-            if precio_actual:
-                break
-    if not precio_actual:
-        candidatos = []
-        for t in soup.select(".a-price .a-offscreen, #price_inside_buybox, #newBuyBoxPrice, .a-offscreen"):
-            val = parse_number_like_amazon(t.get_text(" ", strip=True))
-            if val:
-                candidatos.append(val)
-        if candidatos:
-            precio_actual = candidatos[0]
+    # Precio anterior
+    precio_anterior_tag = soup.select_one(".a-price.a-text-price .a-offscreen")
+    if precio_anterior_tag:
+        precio_anterior = parse_number_like_amazon(precio_anterior_tag.get_text(strip=True))
+    else:
+        # fallback últimos 30 días
+        precio_anterior_tag = soup.select_one(".a-price.a-text-price.srpPriceBlockAUI .a-offscreen")
+        precio_anterior = parse_number_like_amazon(precio_anterior_tag.get_text(strip=True)) if precio_anterior_tag else None
 
-    selectores_antes = [
-        "#corePrice_desktop .a-text-price .a-offscreen",
-        "#corePrice_feature_div .a-text-price .a-offscreen",
-        "#priceblock_listprice .a-offscreen",
-        "span[data-a-strike='true'] .a-offscreen",
-        ".priceBlockStrikePriceString"
-    ]
-    for sel in selectores_antes:
-        tag = soup.select_one(sel)
-        if tag:
-            precio_anterior = parse_number_like_amazon(tag.get_text(" ", strip=True))
-            if precio_anterior and precio_actual and precio_anterior > precio_actual:
-                break
-    if precio_actual and not precio_anterior:
-        posibles = []
-        for t in soup.select(".a-text-price .a-offscreen, span[data-a-strike='true'] .a-offscreen, .priceBlockStrikePriceString"):
-            val = parse_number_like_amazon(t.get_text(" ", strip=True))
-            if val and val > precio_actual:
-                posibles.append(val)
-        if posibles:
-            precio_anterior = max(posibles)
+    # Descuento
+    descuento_tag = soup.select_one(".savingPriceOverride.aok-align-center.reinventPriceSavingsPercentageMargin.savingsPercentage")
+    if descuento_tag:
+        descuento = parse_number_like_amazon(descuento_tag.get_text(strip=True))
+    elif precio_actual and precio_anterior:
+        descuento = round((precio_anterior - precio_actual) / precio_anterior * 100)
+    else:
+        descuento = 0
 
-    if not precio_actual:
-        return None, None
-    if not precio_anterior or precio_anterior <= precio_actual:
-        return precio_actual, None
-    return precio_actual, precio_anterior
+    return precio_actual, precio_anterior, descuento
 
 def formatear_precio_europeo(valor):
     if valor is None:
         return "No disponible"
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
 
-# ----------------- BÚSQUEDA -----------------
-def buscar_productos(keyword=None):
-    if not keyword:
-        keyword = random.choice(PALABRAS_CLAVE)
+# ----------------- BÚSQUEDA PRODUCTOS -----------------
+def buscar_productos():
+    keyword = random.choice(PALABRAS_CLAVE)
     pagina = random.randint(1, 3)
     log(f"🔎 Buscando '{keyword}' página {pagina}...")
     search_url = f"https://www.amazon.es/s?k={requests.utils.requote_uri(keyword)}&page={pagina}"
@@ -247,11 +205,13 @@ def get_product_info(url):
     if not html:
         return None
     soup = BeautifulSoup(html, "html.parser")
+
     titulo_tag = (soup.select_one("#productTitle")
                   or soup.select_one("span.a-size-large.product-title-word-break")
                   or soup.select_one("span.a-size-medium.a-color-base.a-text-normal")
                   or soup.select_one("h1 span"))
     titulo = titulo_tag.get_text(" ", strip=True) if titulo_tag else "Sin título"
+
     imagen_tag = (soup.select_one("#landingImage")
                   or soup.select_one("img#imgBlkFront")
                   or soup.select_one("img.s-image")
@@ -259,14 +219,13 @@ def get_product_info(url):
     imagen = None
     if imagen_tag:
         imagen = imagen_tag.get("src") or imagen_tag.get("data-src")
-    precio_actual, precio_anterior = extraer_precios(soup)
-    if not precio_actual or not precio_anterior or precio_anterior <= precio_actual:
+
+    precio_actual, precio_anterior, descuento = extraer_precios(soup)
+    if not precio_actual:
         return None
-    descuento = round((precio_anterior - precio_actual) / precio_anterior * 100)
     if descuento < MIN_DESCUENTO_PCT:
         return None
-    if not imagen:
-        return None
+
     producto = {
         "asin": asin,
         "titulo": titulo,
@@ -287,26 +246,31 @@ def enviar_telegram(producto):
         return
     try:
         bf_msg = "🔥🔥🔥 <b>BLACK FRIDAY</b> 🔥🔥🔥\n\n" if producto['descuento'] > BLACK_FRIDAY_PCT else ""
-        caption = (
-            f"{bf_msg}<b>{producto['titulo']}</b>\n\n"
-            f"<b>💰 Precio actual:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
-            f"<b>📉 Precio anterior:</b> {formatear_precio_europeo(producto['precio_anterior'])}\n"
-            f"<b>🔥 -{producto['descuento']}% de descuento</b>\n\n"
-            f"🛒 <a href=\"{producto['url']}\">{producto['url']}</a>"
-        )
+        caption = f"{bf_msg}<b>{producto['titulo']}</b>\n\n"
+        caption += f"<b>💰 Precio con cupón:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
+        if producto.get('precio_anterior'):
+            caption += f"<b>📉 Precio recomendado:</b> {formatear_precio_europeo(producto['precio_anterior'])}\n"
+        if producto.get('descuento'):
+            caption += f"<b>🔥 -{producto['descuento']}% de descuento</b>\n\n"
+        caption += f"{producto['url']}"  # solo link de afiliado
+
         img_resp = requests.get(producto['imagen'], timeout=20)
         img_resp.raise_for_status()
-        files = {"photo": ("image.jpg", img_resp.content)}
+        img_bytes = img_resp.content
+        files = {"photo": ("image.jpg", img_bytes)}
+
         r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
             data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML", "disable_web_page_preview": "false"},
             files=files,
             timeout=30
         )
+
         if r.status_code == 200:
             log(f"Enviado Telegram: {producto['asin']}")
         else:
             log(f"Error Telegram {r.status_code}: {r.text}")
+
     except Exception as e:
         log(f"ERROR enviando Telegram {producto.get('asin','?')}: {e}")
 
@@ -324,30 +288,17 @@ def deduplicar_y_guardar(productos):
     except Exception as e:
         log(f"Error guardando Excel: {e}")
 
-# ----------------- BUCLE PRINCIPAL CON REINTENTOS -----------------
+# ----------------- BUCLE PRINCIPAL -----------------
 def main_loop():
     ensure_dirs()
     historial = cargar_historial()
     while True:
         try:
-            keyword = random.choice(PALABRAS_CLAVE)
-            intentos = 0
-            urls = []
-
-            # Reintentos si no hay URLs
-            while intentos < 3 and not urls:
-                log(f"🔎 Buscando '{keyword}' (intento {intentos+1}/3)...")
-                urls = buscar_productos(keyword)
-                if urls:
-                    break
-                intentos += 1
-                time.sleep(5)
-
+            urls = buscar_productos()
             if not urls:
-                log(f"⚠️ No se encontraron URLs para '{keyword}' tras {intentos} intentos. Probando otra keyword en 15 segundos...")
-                time.sleep(15)
+                log("No se encontraron URLs. Reintentando pronto...")
+                time.sleep(10)
                 continue
-
             productos_encontrados = []
             for url in urls:
                 p = get_product_info(url)
@@ -357,13 +308,10 @@ def main_loop():
                     productos_encontrados.append(p)
                     log("⏳ Esperando 10 minutos antes del siguiente envío...")
                     time.sleep(10 * 60)
-
             if productos_encontrados:
                 deduplicar_y_guardar(productos_encontrados)
-
-            log("⏳ Ciclo terminado. Esperando 10 minutos antes de la siguiente palabra clave...\n")
+            log("⏳ Ciclo terminado. Esperando 10 minutos...\n")
             time.sleep(10 * 60)
-
         except KeyboardInterrupt:
             log("Interrupción por teclado")
             break
@@ -375,5 +323,5 @@ def main_loop():
 if __name__ == "__main__":
     if not TELEGRAM_TOKEN or not CHAT_ID:
         log("⚠️ Atención: TELEGRAM_TOKEN o CHAT_ID no configurado.")
-    log("🚀 Sistema Amazon iniciado (precios corregidos).")
+    log("🚀 Sistema Amazon iniciado (precio extraído de aok-offscreen, descuento calculado).")
     main_loop()
