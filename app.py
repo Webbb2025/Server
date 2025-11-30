@@ -12,9 +12,6 @@ import json
 import traceback
 import re
 
-
-
-
 # ---------------- CONFIG ----------------
 TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
 CHAT_ID = "-1002428790704"
@@ -22,18 +19,12 @@ TAG = "crt06f-21"
 
 EXCEL_FILE = "productos.xlsx"
 LOG_FILE = "log.txt"
-
 ENVIADOS_DIR = "enviados"
 HISTORIAL_FILE = "enviados_historial.json"
 NO_REPEAT_DAYS = 15
 
 PALABRAS_CLAVE = [
-    "Hogar",
-    "ropa",
-    "juguetes",
-    "juegos",
-    "bebé",
-    "deporte"
+    "Hogar", "ropa", "juguetes", "juegos", "bebé", "deporte"
 ]
 
 HEADERS_ROTATIVOS = [
@@ -248,7 +239,7 @@ def enviar_telegram(producto):
     try:
         bf_msg = "🔥🔥🔥 <b>BLACK FRIDAY</b> 🔥🔥🔥\n\n" if producto['descuento'] > BLACK_FRIDAY_PCT else ""
         caption = f"{bf_msg}<b>{producto['titulo']}</b>\n\n"
-        caption += f"<b>💰 Precio:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
+        caption += f"<b>💰 Precio con cupón:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
         if producto.get('precio_anterior'):
             caption += f"<b>📉 Precio recomendado:</b> {formatear_precio_europeo(producto['precio_anterior'])}\n"
         if producto.get('descuento'):
@@ -298,7 +289,7 @@ def main_loop():
             urls = buscar_productos()
             if not urls:
                 log("No se encontraron URLs. Reintentando pronto...")
-                time.sleep(10)
+                time.sleep(10)  # retry rápido
                 continue
             productos_encontrados = []
             for url in urls:
@@ -307,12 +298,12 @@ def main_loop():
                     enviar_telegram(p)
                     registrar_envio(p["asin"], historial)
                     productos_encontrados.append(p)
-                    log("⏳ Esperando 9 minutos antes del siguiente envío...")
-                    time.sleep(9 * 60)
+                    log("⏳ Esperando 10 minutos antes del siguiente envío...")
+                    time.sleep(10 * 60)
             if productos_encontrados:
                 deduplicar_y_guardar(productos_encontrados)
-            log("⏳ Ciclo terminado. Esperando 9 minutos...\n")
-            time.sleep(9 * 60)
+            log("⏳ Ciclo terminado. Esperando 10 minutos...\n")
+            time.sleep(10 * 60)
         except KeyboardInterrupt:
             log("Interrupción por teclado")
             break
