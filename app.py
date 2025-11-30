@@ -1,51 +1,55 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Amazon scraper using Playwright (synchronous) that extracts prices reliably (buybox, coupons,
+recommended/list price, 30-day low) and sends Telegram messages with affiliate link.
+ASINs are validated to start with "B0" only.
 
-import requests
-import random
-import time
-import pandas as pd
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+Requirements:
+    pip install playwright requests beautifulsoup4 pandas
+    playwright install --with-deps
+
+Set environment variables:
+    TELEGRAM_TOKEN, CHAT_ID, AFFILIATE_TAG (optional, defaults to crt06f-21)
+"""
+
 import os
-import json
-import traceback
 import re
+import json
+import time
+import random
+import traceback
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
+from playwright.sync_api import sync_playwright, TimeoutError as PlayTimeoutError
 
 # ---------------- CONFIG ----------------
-TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
-CHAT_ID = "-1002428790704"
-TAG = "crt06f-21"
-
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg")
+CHAT_ID = os.getenv("CHAT_ID", "-1002428790704")
+TAG = os.getenv("AFFILIATE_TAG", "crt06f-21")
 
 EXCEL_FILE = "productos.xlsx"
 LOG_FILE = "log.txt"
-
 ENVIADOS_DIR = "enviados"
 HISTORIAL_FILE = "enviados_historial.json"
-NO_REPEAT_DAYS = 15  # NO repetir el mismo producto en 15 días
+NO_REPEAT_DAYS = int(os.getenv("NO_REPEAT_DAYS", "15"))
 
-PALABRAS_CLAVE = [
-    "Hogar",
-    "ropa",
-    "juguetes",
-    "juegos",
-    "bebé",
-    "deporte"
+KEYWORDS = ["Hogar", "ropa", "juguetes", "juegos", "bebé", "deporte"]
+
+MIN_DISCOUNT_PCT = int(os.getenv("MIN_DISCOUNT_PCT", "10"))
+BLACK_FRIDAY_PCT = int(os.getenv("BLACK_FRIDAY_PCT", "30"))
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15",
 ]
 
-HEADERS_ROTATIVOS = [
-    {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"},
-    {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/121.0"},
-    {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15"},
-]
-
-MIN_DESCUENTO_PCT = 10
-BLACK_FRIDAY_PCT = 30
-
-# ----------------- UTILIDADES -----------------
-def log(msg):
+# ---------------- HELPERS ----------------
+def log(msg: str):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
@@ -56,10 +60,9 @@ def log(msg):
         pass
 
 def ensure_dirs():
-    if not os.path.exists(ENVIADOS_DIR):
-        os.makedirs(ENVIADOS_DIR, exist_ok=True)
+    os.makedirs(ENVIADOS_DIR, exist_ok=True)
 
-def cargar_historial():
+def load_history():
     if not os.path.exists(HISTORIAL_FILE):
         return {}
     try:
@@ -68,313 +71,378 @@ def cargar_historial():
     except:
         return {}
 
-def guardar_historial(hist):
+def save_history(hist):
     try:
         with open(HISTORIAL_FILE, "w", encoding="utf-8") as f:
             json.dump(hist, f, indent=4, ensure_ascii=False)
     except Exception as e:
-        log(f"Error guardando historial: {e}")
+        log(f"Error saving history: {e}")
 
-def fue_enviado_recientemente(asin, historial):
-    if asin not in historial:
+def was_sent_recently(asin, history):
+    if asin not in history:
         return False
     try:
-        fecha_envio = datetime.fromisoformat(historial[asin])
-        return datetime.now() - fecha_envio < timedelta(days=NO_REPEAT_DAYS)
+        d = datetime.fromisoformat(history[asin])
+        return datetime.now() - d < timedelta(days=NO_REPEAT_DAYS)
     except:
         return False
 
-def registrar_envio(asin, historial):
-    historial[asin] = datetime.now().isoformat()
-    guardar_historial(historial)
+def register_sent(asin, history):
+    history[asin] = datetime.now().isoformat()
+    save_history(history)
 
-# ----------------- ASIN & URL -----------------
-def extract_asin(url):
+# ---------------- ASIN / URL ----------------
+def extract_asin(url: str):
+    """
+    Return ASIN only if it starts with B0 and matches 10-char Amazon ASIN pattern.
+    """
+    if not url:
+        return None
     try:
-        m = re.search(r"/dp/([A-Z0-9]{10})", url)
-        if m:
-            return m.group(1)
-        m = re.search(r"/gp/product/([A-Z0-9]{10})", url)
-        if m:
-            return m.group(1)
-        m = re.search(r"/([A-Z0-9]{10})(?:[/?]|$)", url)
-        if m:
-            return m.group(1)
+        patterns = [
+            r"/dp/(B0[A-Z0-9]{8})",
+            r"/gp/product/(B0[A-Z0-9]{8})",
+            r"/(B0[A-Z0-9]{8})(?:[/?]|$)"
+        ]
+        for pat in patterns:
+            m = re.search(pat, url)
+            if m:
+                asin = m.group(1)
+                if asin and asin.startswith("B0") and len(asin) == 10:
+                    return asin
     except:
         return None
     return None
 
-def crear_url_afiliado(asin):
+def affiliate_url(asin: str):
     return f"https://www.amazon.es/dp/{asin}?tag={TAG}&linkCode=ogi&th=1&psc=1"
 
-def crear_url_scrape(asin):
-    return f"https://www.amazon.es/dp/{asin}"
-
-# ----------------- HTTP -----------------
-def scraperapi_get(url):
-    headers = random.choice(HEADERS_ROTATIVOS)
-    try:
-        time.sleep(random.uniform(1.5, 3.0))
-        r = requests.get(url, headers=headers, timeout=25)
-        if r.status_code == 200:
-            return r.text
-        if r.status_code in (403, 503):
-            log(f"Amazon bloqueó ({r.status_code}). Reintentando con otro header...")
-            time.sleep(random.uniform(2, 5))
-            headers = random.choice(HEADERS_ROTATIVOS)
-            r = requests.get(url, headers=headers, timeout=25)
-            if r.status_code == 200:
-                return r.text
-        log(f"Error HTTP {r.status_code} para {url}")
-        return None
-    except Exception as e:
-        log(f"Error GET {url}: {e}")
-        return None
-
-# ----------------- PARSERS -----------------
-def parse_number_like_amazon(text):
-    if not text:
-        return None
-    text = text.replace("\xa0", "").replace("\u202f", "").strip()
-    patterns = [
-        r"\d{1,3}(?:[.\s]\d{3})*,\d{1,2}",
-        r"\d+(?:,\d{1,2})",
-        r"\d{1,3}(?:[.\s]\d{3})+",
-        r"\d+"
-    ]
-    for pat in patterns:
-        m = re.search(pat, text)
-        if m:
-            raw = m.group(0).replace(" ", "").replace(".", "").replace(",", ".")
-            try:
-                return float(raw)
-            except:
-                continue
+def scrape_url_for_asin_only(href: str):
+    """
+    Normalize relative Amazon hrefs to absolute dp urls for scraping.
+    """
+    if href.startswith("/"):
+        return "https://www.amazon.es" + href
+    if href.startswith("http"):
+        return href
     return None
 
-def extraer_precios(soup):
+# ---------------- PLAYWRIGHT PAGE FETCH ----------------
+def fetch_rendered_html(url: str, timeout: int = 30000, retries: int = 2):
+    """
+    Use Playwright to get rendered HTML. Launch/close browser each call (safer in
+    ephemeral environments like Railway). Returns HTML string or None.
+    """
+    attempt = 0
+    while attempt <= retries:
+        attempt += 1
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+                context = browser.new_context(
+                    user_agent=random.choice(USER_AGENTS),
+                    locale="es-ES",
+                    timezone_id="Europe/Madrid",
+                    viewport={"width": 1200, "height": 800}
+                )
+                page = context.new_page()
+                page.set_default_navigation_timeout(timeout)
+                page.goto(url, wait_until="networkidle")
+                # give some time for dynamic modules (coupons, savings) to appear
+                time.sleep(random.uniform(0.5, 1.5))
+                html = page.content()
+                try:
+                    context.close()
+                except:
+                    pass
+                try:
+                    browser.close()
+                except:
+                    pass
+                return html
+        except PlayTimeoutError as e:
+            log(f"Playwright timeout (attempt {attempt}) for {url}: {e}")
+            if attempt > retries:
+                return None
+            time.sleep(1 + attempt)
+        except Exception as e:
+            log(f"Playwright error (attempt {attempt}) for {url}: {e}")
+            if attempt > retries:
+                return None
+            time.sleep(1 + attempt)
+    return None
+
+# ---------------- PRICE PARSING ----------------
+def parse_number_like_amazon(text: str):
+    if not text:
+        return None
+    t = text.replace("\xa0", "").replace("\u202f", "").replace("€", "").strip()
+    # Replace comma decimal
+    t = t.replace(",", ".")
+    m = re.findall(r"[\d]+(?:\.[\d]+)?", t)
+    if not m:
+        return None
+    try:
+        return float(m[0])
+    except:
+        return None
+
+def extract_prices_from_soup(soup: BeautifulSoup):
+    """
+    Robust extraction:
+      - current price: .aok-offscreen OR a-price-whole + fraction OR buybox selectors
+      - coupon price: priceBlockSavingsString or price inside #priceblock_ourprice when coupon applied
+      - previous price: .a-price.a-text-price .a-offscreen OR srpPriceBlockAUI OR highest reasonable strike
+      - discount: savings selector or computed
+    Returns (precio_actual: float, precio_anterior: float|None, descuento:int)
+    """
     precio_actual = None
     precio_anterior = None
+    descuento = 0
 
-    selectores_actual = [
-        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
-        "#corePrice_feature_div .a-price .a-offscreen",
-        "span[data-a-color='price'] span.a-offscreen",
-        "#price_inside_buybox",
-        "#newBuyBoxPrice"
-    ]
-    for sel in selectores_actual:
-        tag = soup.select_one(sel)
-        if tag:
-            precio_actual = parse_number_like_amazon(tag.get_text(" ", strip=True))
-            if precio_actual:
-                break
+    # 1) Try .aok-offscreen (common)
+    tag = soup.select_one(".aok-offscreen")
+    if tag:
+        precio_actual = parse_number_like_amazon(tag.get_text(" ", strip=True))
+
+    # 2) a-price-whole + fraction (visual)
     if not precio_actual:
-        candidatos = []
-        for t in soup.select(".a-price .a-offscreen, #price_inside_buybox, #newBuyBoxPrice, .a-offscreen"):
-            val = parse_number_like_amazon(t.get_text(" ", strip=True))
-            if val:
-                candidatos.append(val)
-        if candidatos:
-            precio_actual = candidatos[0]
+        whole = soup.select_one("span.a-price > span.a-price-whole")
+        frac = soup.select_one("span.a-price > span.a-price-fraction")
+        if whole:
+            w = whole.get_text("", strip=True).replace(".", "").replace("\xa0", "")
+            f = frac.get_text("", strip=True) if frac else "00"
+            try:
+                precio_actual = float(w + "." + f)
+            except:
+                precio_actual = None
 
-    selectores_antes = [
-        "#corePrice_desktop .a-text-price .a-offscreen",
-        "#corePrice_feature_div .a-text-price .a-offscreen",
-        "#priceblock_listprice .a-offscreen",
-        "span[data-a-strike='true'] .a-offscreen",
-        ".priceBlockStrikePriceString"
-    ]
-    for sel in selectores_antes:
-        tag = soup.select_one(sel)
-        if tag:
-            precio_anterior = parse_number_like_amazon(tag.get_text(" ", strip=True))
-            if precio_anterior and precio_actual and precio_anterior > precio_actual:
-                break
-    if precio_actual and not precio_anterior:
-        posibles = []
-        for t in soup.select(".a-text-price .a-offscreen, span[data-a-strike='true'] .a-offscreen, .priceBlockStrikePriceString"):
-            val = parse_number_like_amazon(t.get_text(" ", strip=True))
-            if val and val > precio_actual:
-                posibles.append(val)
-        if posibles:
-            precio_anterior = max(posibles)
+    # 3) fallback buybox selectors
+    if not precio_actual:
+        for sel in [
+            "#priceblock_ourprice",
+            "#priceblock_dealprice",
+            "#price_inside_buybox",
+            "#newBuyBoxPrice",
+            ".a-price .a-offscreen"
+        ]:
+            t = soup.select_one(sel)
+            if t:
+                precio_actual = parse_number_like_amazon(t.get_text(" ", strip=True))
+                if precio_actual:
+                    break
+
+    # 4) Coupon-specific selector (override if appears)
+    cup_tag = soup.select_one("#priceBlockSavingsString, #priceBlockSavingsString_feature_div")
+    if cup_tag:
+        val = parse_number_like_amazon(cup_tag.get_text(" ", strip=True))
+        if val and val > 0.0:
+            precio_actual = val
+
+    # PREVIOUS / RECOMMENDED PRICE
+    # Primary: list price / strike price
+    pa_tag = soup.select_one(".a-price.a-text-price .a-offscreen, #priceblock_listprice .a-offscreen, .priceBlockStrikePriceString")
+    if pa_tag:
+        precio_anterior = parse_number_like_amazon(pa_tag.get_text(" ", strip=True))
+    else:
+        # fallback: 30-day low / srp block
+        pa_tag2 = soup.select_one(".a-price.a-text-price.srpPriceBlockAUI .a-offscreen")
+        if pa_tag2:
+            precio_anterior = parse_number_like_amazon(pa_tag2.get_text(" ", strip=True))
+        else:
+            # fallback: search for reasonable struck prices
+            candidates = []
+            for t in soup.select(".a-text-price .a-offscreen, span[data-a-strike='true'] .a-offscreen, .priceBlockStrikePriceString"):
+                v = parse_number_like_amazon(t.get_text(" ", strip=True))
+                if v and precio_actual and v > precio_actual and v < precio_actual * 5:
+                    candidates.append(v)
+            if candidates:
+                precio_anterior = max(candidates)
+
+    # DISCOUNT
+    desc_tag = soup.select_one(".savingPriceOverride.aok-align-center.reinventPriceSavingsPercentageMargin.savingsPercentage, .savingsPercentage")
+    if desc_tag:
+        dval = parse_number_like_amazon(desc_tag.get_text(" ", strip=True))
+        if dval:
+            descuento = int(round(dval))
+    elif precio_actual and precio_anterior and precio_anterior > 0:
+        descuento = int(round((precio_anterior - precio_actual) / precio_anterior * 100))
 
     if not precio_actual:
-        return None, None
-    if not precio_anterior or precio_anterior <= precio_actual:
-        return precio_actual, None
-    return precio_actual, precio_anterior
+        return None, None, 0
+    return precio_actual, precio_anterior, descuento
 
-def formatear_precio_europeo(valor):
-    if valor is None:
-        return "No disponible"
-    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
-
-# ----------------- BÚSQUEDA -----------------
-def buscar_productos(keyword=None):
-    if not keyword:
-        keyword = random.choice(PALABRAS_CLAVE)
-    pagina = random.randint(1, 3)
-    log(f"🔎 Buscando '{keyword}' página {pagina}...")
-    search_url = f"https://www.amazon.es/s?k={requests.utils.requote_uri(keyword)}&page={pagina}"
-    html = scraperapi_get(search_url)
-    if not html:
-        log("Sin HTML de búsqueda")
-        return []
+# ---------------- SEARCH / PRODUCT HANDLERS ----------------
+def extract_product_urls_from_search_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
-    enlaces = soup.select("a.a-link-normal.s-no-hover.s-underline-text.s-underline-link-text, a.a-link-normal.s-no-outline, h2 a.a-link-normal")
+    anchors = soup.select("a.a-link-normal.s-no-hover.s-underline-text.s-underline-link-text, a.a-link-normal.s-no-outline, h2 a.a-link-normal")
     urls = set()
-    for a in enlaces:
+    for a in anchors:
         href = a.get("href", "")
         if not href:
             continue
-        if href.startswith("/"):
-            href = "https://www.amazon.es" + href
-        if "/dp/" in href or "/gp/product/" in href:
-            asin = extract_asin(href)
-            if asin:
-                urls.add(crear_url_scrape(asin))
-    urls = sorted(list(urls))
-    log(f"URLs encontradas: {len(urls)}")
-    return urls
+        normalized = scrape_url_for_asin_only(href)
+        if not normalized:
+            continue
+        asin = extract_asin(normalized)
+        if asin:
+            # use scrape dp url (no affiliate tag for scraping)
+            urls.add(f"https://www.amazon.es/dp/{asin}")
+    return sorted(list(urls))
 
-# ----------------- INFO PRODUCTO -----------------
-def get_product_info(url):
+def get_product_info_playwright(url: str):
+    """
+    Fetch product page via Playwright and parse title, image, prices.
+    Returns product dict or None.
+    """
     asin = extract_asin(url)
     if not asin:
         return None
-    html = scraperapi_get(url)
+    html = fetch_rendered_html(url)
     if not html:
         return None
     soup = BeautifulSoup(html, "html.parser")
-    titulo_tag = (soup.select_one("#productTitle")
-                  or soup.select_one("span.a-size-large.product-title-word-break")
-                  or soup.select_one("span.a-size-medium.a-color-base.a-text-normal")
-                  or soup.select_one("h1 span"))
-    titulo = titulo_tag.get_text(" ", strip=True) if titulo_tag else "Sin título"
-    imagen_tag = (soup.select_one("#landingImage")
-                  or soup.select_one("img#imgBlkFront")
-                  or soup.select_one("img.s-image")
-                  or soup.select_one("div#imgTagWrapperId img"))
-    imagen = None
-    if imagen_tag:
-        imagen = imagen_tag.get("src") or imagen_tag.get("data-src")
-    precio_actual, precio_anterior = extraer_precios(soup)
-    if not precio_actual or not precio_anterior or precio_anterior <= precio_actual:
+
+    title_tag = soup.select_one("#productTitle") or soup.select_one("h1 span")
+    title = title_tag.get_text(" ", strip=True) if title_tag else "No title"
+
+    image_tag = soup.select_one("#landingImage") or soup.select_one("img.s-image") or soup.select_one("img#imgBlkFront")
+    image = image_tag.get("src") if image_tag else None
+
+    precio_actual, precio_anterior, descuento = extract_prices_from_soup(soup)
+    if not precio_actual:
         return None
-    descuento = round((precio_anterior - precio_actual) / precio_anterior * 100)
-    if descuento < MIN_DESCUENTO_PCT:
+    if descuento < MIN_DISCOUNT_PCT:
         return None
-    if not imagen:
-        return None
-    producto = {
+
+    product = {
         "asin": asin,
-        "titulo": titulo,
-        "imagen": imagen,
+        "title": title,
+        "image": image,
         "precio_actual": precio_actual,
         "precio_anterior": precio_anterior,
         "descuento": descuento,
         "url_scrape": url,
-        "url": crear_url_afiliado(asin)
+        "url": affiliate_url(asin),
     }
-    log(f"Producto OK: {asin} | -{descuento}% | {formatear_precio_europeo(precio_actual)} (antes {formatear_precio_europeo(precio_anterior)})")
-    return producto
+    log(f"Product OK: {asin} | -{descuento}% | {formatear_euro(precio_actual)} (before {formatear_euro(precio_anterior)})")
+    return product
 
-# ----------------- TELEGRAM -----------------
-def enviar_telegram(producto):
+# ---------------- FORMATTING ----------------
+def formatear_euro(valor):
+    if valor is None:
+        return "No disponible"
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+# ---------------- TELEGRAM ----------------
+def send_telegram(product: dict):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        log("TOKEN o CHAT_ID no configurado. Saltando envío Telegram.")
+        log("Missing TELEGRAM_TOKEN or CHAT_ID.")
         return
     try:
-        bf_msg = "🔥🔥🔥 <b>BLACK FRIDAY</b> 🔥🔥🔥\n\n" if producto['descuento'] > BLACK_FRIDAY_PCT else ""
-        caption = (
-            f"{bf_msg}<b>{producto['titulo']}</b>\n\n"
-            f"<b>💰 Precio actual:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
-            f"<b>📉 Precio anterior:</b> {formatear_precio_europeo(producto['precio_anterior'])}\n"
-            f"<b>🔥 -{producto['descuento']}% de descuento</b>\n\n"
-            f"🛒 <a href=\"{producto['url']}\">{producto['url']}</a>"
-        )
-        img_resp = requests.get(producto['imagen'], timeout=20)
-        img_resp.raise_for_status()
-        files = {"photo": ("image.jpg", img_resp.content)}
-        r = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-            data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML", "disable_web_page_preview": "false"},
-            files=files,
-            timeout=30
-        )
-        if r.status_code == 200:
-            log(f"Enviado Telegram: {producto['asin']}")
-        else:
-            log(f"Error Telegram {r.status_code}: {r.text}")
-    except Exception as e:
-        log(f"ERROR enviando Telegram {producto.get('asin','?')}: {e}")
+        bf = "🔥🔥🔥 <b>BLACK FRIDAY</b> 🔥🔥🔥\n\n" if product.get("descuento", 0) > BLACK_FRIDAY_PCT else ""
+        caption = f"{bf}<b>{product.get('title')}</b>\n\n"
+        caption += f"<b>💰 Price:</b> {formatear_euro(product.get('precio_actual'))}\n"
+        if product.get("precio_anterior"):
+            caption += f"<b>📉 Recommended:</b> {formatear_euro(product.get('precio_anterior'))}\n"
+        if product.get("descuento"):
+            caption += f"<b>🔥 -{product.get('descuento')}% off</b>\n\n"
+        # Only show affiliate link (not a textual "Buy" label)
+        caption += product.get("url")
 
-# ----------------- GUARDADO -----------------
-def deduplicar_y_guardar(productos):
-    asin_map = {p["asin"]: p for p in productos}
-    lista = list(asin_map.values())
-    if not lista:
+        files = None
+        if product.get("image"):
+            try:
+                r = requests.get(product.get("image"), timeout=20)
+                r.raise_for_status()
+                files = {"photo": ("image.jpg", r.content)}
+            except Exception as e:
+                log(f"Failed to download image: {e}")
+                files = None
+
+        data = {"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML", "disable_web_page_preview": "false"}
+        if files:
+            resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data=data, files=files, timeout=30)
+        else:
+            # fallback to sendMessage if image not available
+            resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": caption, "parse_mode": "HTML"}, timeout=30)
+
+        if resp.status_code == 200:
+            log(f"Sent Telegram: {product.get('asin')}")
+        else:
+            log(f"Telegram error {resp.status_code}: {resp.text}")
+    except Exception as e:
+        log(f"Error sending Telegram: {e}")
+
+# ---------------- SAVE / DEDUP ----------------
+def dedupe_and_save(products: list):
+    asin_map = {p["asin"]: p for p in products}
+    lst = list(asin_map.values())
+    if not lst:
         return
-    df = pd.DataFrame(lista)
-    df['precio_actual'] = df['precio_actual'].apply(lambda x: formatear_precio_europeo(x))
-    df['precio_anterior'] = df['precio_anterior'].apply(lambda x: formatear_precio_europeo(x))
+    df = pd.DataFrame(lst)
+    df["precio_actual"] = df["precio_actual"].apply(lambda x: formatear_euro(x))
+    df["precio_anterior"] = df["precio_anterior"].apply(lambda x: formatear_euro(x))
     try:
         df.to_excel(EXCEL_FILE, index=False)
     except Exception as e:
-        log(f"Error guardando Excel: {e}")
+        log(f"Error saving excel: {e}")
 
-# ----------------- BUCLE PRINCIPAL CON REINTENTOS -----------------
+# ---------------- MAIN LOOP ----------------
 def main_loop():
     ensure_dirs()
-    historial = cargar_historial()
+    history = load_history()
     while True:
         try:
-            keyword = random.choice(PALABRAS_CLAVE)
-            intentos = 0
-            urls = []
+            keyword = random.choice(KEYWORDS)
+            page = random.randint(1, 3)
+            search_url = f"https://www.amazon.es/s?k={requests.utils.requote_uri(keyword)}&page={page}"
+            log(f"Searching '{keyword}' page {page}...")
 
-            # Reintentos si no hay URLs
-            while intentos < 3 and not urls:
-                log(f"🔎 Buscando '{keyword}' (intento {intentos+1}/3)...")
-                urls = buscar_productos(keyword)
-                if urls:
-                    break
-                intentos += 1
-                time.sleep(5)
-
-            if not urls:
-                log(f"⚠️ No se encontraron URLs para '{keyword}' tras {intentos} intentos. Probando otra keyword en 15 segundos...")
-                time.sleep(15)
+            html_search = fetch_rendered_html(search_url)
+            if not html_search:
+                log("No search HTML (playwright). Retrying soon...")
+                time.sleep(10)
                 continue
 
-            productos_encontrados = []
+            urls = extract_product_urls_from_search_html(html_search)
+            log(f"Found {len(urls)} product urls.")
+            if not urls:
+                time.sleep(10)
+                continue
+
+            found_products = []
             for url in urls:
-                p = get_product_info(url)
-                if p and not fue_enviado_recientemente(p["asin"], historial):
-                    enviar_telegram(p)
-                    registrar_envio(p["asin"], historial)
-                    productos_encontrados.append(p)
-                    log("⏳ Esperando 10 minutos antes del siguiente envío...")
+                # ensure ASIN starts with B0 before processing
+                asin = extract_asin(url)
+                if not asin:
+                    continue
+                # fetch product info (rendered)
+                product = get_product_info_playwright(url)
+                if product and not was_sent_recently(product["asin"], history):
+                    send_telegram(product)
+                    register_sent(product["asin"], history)
+                    found_products.append(product)
+                    log("Waiting 10 minutes before next send...")
                     time.sleep(10 * 60)
 
-            if productos_encontrados:
-                deduplicar_y_guardar(productos_encontrados)
+            if found_products:
+                dedupe_and_save(found_products)
 
-            log("⏳ Ciclo terminado. Esperando 10 minutos antes de la siguiente palabra clave...\n")
+            log("Cycle finished. Waiting 10 minutes before next keyword...\n")
             time.sleep(10 * 60)
 
         except KeyboardInterrupt:
-            log("Interrupción por teclado")
+            log("Keyboard interrupt, exiting.")
             break
         except Exception as e:
-            log(f"ERROR inesperado: {e}")
+            log(f"Unexpected error in main loop: {e}")
             log(traceback.format_exc())
-            time.sleep(60)
+            time.sleep(30)
 
 if __name__ == "__main__":
+    # small quick-check for required env
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        log("⚠️ Atención: TELEGRAM_TOKEN o CHAT_ID no configurado.")
-    log("🚀 Sistema Amazon iniciado (precios corregidos).")
+        log("⚠️ TELEGRAM_TOKEN or CHAT_ID not configured.")
+    log("🚀 Amazon scraper (Playwright) started.")
     main_loop()
