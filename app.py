@@ -16,7 +16,7 @@ import re
 TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
 CHAT_ID = "-1002428790704"
 TAG = "crt06f-21"
-ZENROWS_API_KEY = "f0835c15823974a7f89cccf8f927d523436cd104" # <--- IMPORTANTE
+ZENROWS_API_KEY = "f0835c15823974a7f89cccf8f927d523436cd104"
 
 EXCEL_FILE = "productos.xlsx"
 LOG_FILE = "log.txt"
@@ -25,16 +25,16 @@ HISTORIAL_FILE = "enviados_historial.json"
 NO_REPEAT_DAYS = 15
 
 PALABRAS_CLAVE = [
-    "Hogar",
-    "ropa",
-    "juguetes",
-    "juegos",
-    "bebé",
-    "deporte"
+    "Hogar", "ropa", "juguetes", "juegos", "bebé", "deporte"
 ]
 
 MIN_DESCUENTO_PCT = 10
-BLACK_FRIDAY_PCT = 30
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+]
 
 # ---------------- UTILIDADES ----------------
 def log(msg):
@@ -83,19 +83,18 @@ def registrar_envio(asin, historial):
 
 # ---------------- SCRAPING CON ZENROWS ----------------
 def scraperapi_get(url):
-    """
-    Scraping antibloqueo usando ZenRows.
-    Funciona 100% en Railway.
-    """
+    """Scraping antibloqueo usando ZenRows."""
+
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
 
     api_url = (
         f"https://api.zenrows.com/v1/?apikey={ZENROWS_API_KEY}"
         f"&url={requests.utils.quote(url)}"
-        f"&antibot=true&premium_proxy=true&country=es"
+        f"&antibot=true&premium_proxy=true"
     )
 
     try:
-        r = requests.get(api_url, timeout=60)
+        r = requests.get(api_url, headers=headers, timeout=60)
         if r.status_code == 200:
             return r.text
 
@@ -111,7 +110,7 @@ def scraperapi_get(url):
 def parse_number_like_amazon(text):
     if not text:
         return None
-    text = text.replace("\xa0", "").replace("\u202f", "").replace("€","").strip()
+    text = text.replace("\xa0", "").replace("\u202f", "").replace("€", "").strip()
     text = text.replace(",", ".")
     try:
         return float(re.findall(r"[\d\.]+", text)[0])
@@ -119,14 +118,11 @@ def parse_number_like_amazon(text):
         return None
 
 def extraer_precios(soup):
-    precio_actual_tag = soup.select_one(".aok-offscreen")
+    precio_actual_tag = soup.select_one(".a-offscreen")
     precio_actual = parse_number_like_amazon(precio_actual_tag.get_text(strip=True)) if precio_actual_tag else None
 
-    precio_anterior_tag = soup.select_one(".a-price.a-text-price .a-offscreen")
-    if precio_anterior_tag:
-        precio_anterior = parse_number_like_amazon(precio_anterior_tag.get_text(strip=True))
-    else:
-        precio_anterior = None
+    precio_anterior_tag = soup.select_one(".a-text-price .a-offscreen")
+    precio_anterior = parse_number_like_amazon(precio_anterior_tag.get_text(strip=True)) if precio_anterior_tag else None
 
     if precio_actual and precio_anterior:
         descuento = round((precio_anterior - precio_actual) / precio_anterior * 100)
@@ -134,7 +130,6 @@ def extraer_precios(soup):
         descuento = 0
 
     return precio_actual, precio_anterior, descuento
-
 
 def extract_asin(url):
     try:
@@ -170,12 +165,12 @@ def buscar_productos():
 
     for a in enlaces:
         href = a.get("href", "")
-        if href.startswith("/dp/"):
+        if "/dp/" in href:
             asin = extract_asin(href)
             if asin:
                 urls.add("https://www.amazon.es" + href)
 
-    urls = sorted(list(urls))
+    urls = sorted(urls)
     log(f"URLs encontradas: {len(urls)}")
 
     return urls
@@ -193,10 +188,10 @@ def get_product_info(url):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    titulo_tag = soup.select_one("#productTitle") or soup.select_one("h1 span")
+    titulo_tag = soup.select_one("#productTitle")
     titulo = titulo_tag.get_text(" ", strip=True) if titulo_tag else "Sin título"
 
-    imagen_tag = soup.select_one("#landingImage") or soup.select_one("img.s-image")
+    imagen_tag = soup.select_one("#landingImage")
     imagen = imagen_tag.get("src") if imagen_tag else None
 
     precio_actual, precio_anterior, descuento = extraer_precios(soup)
@@ -263,10 +258,10 @@ def main_loop():
                     enviar_telegram(p)
                     registrar_envio(p["asin"], historial)
                     log("⏳ Esperando 10 minutos...")
-                    time.sleep(10 * 60)
+                    time.sleep(600)
 
             log("🔁 Ciclo completo. Pausa 10 min...\n")
-            time.sleep(10 * 60)
+            time.sleep(600)
 
         except Exception as e:
             log(f"ERROR inesperado: {e}")
