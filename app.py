@@ -258,7 +258,7 @@ def enviar_telegram(producto):
     try:
         bf_msg = "🔥🔥🔥 <b>BLACK FRIDAY</b> 🔥🔥🔥\n\n" if producto['descuento'] > BLACK_FRIDAY_PCT else ""
         caption = f"{bf_msg}<b>{producto['titulo']}</b>\n\n"
-        caption += f"<b>💰 Precio con cupón:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
+        caption += f"<b>💰 Precio:</b> {formatear_precio_europeo(producto['precio_actual'])}\n"
         if producto.get('precio_anterior'):
             caption += f"<b>📉 Precio recomendado:</b> {formatear_precio_europeo(producto['precio_anterior'])}\n"
         if producto.get('descuento'):
