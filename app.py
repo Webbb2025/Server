@@ -202,8 +202,16 @@ def get_product_info(url):
     if not asin:
         return None
     html = scraperapi_get(url)
+    
+    ### FIX AQUÍ — indentación correcta ###
     with open("debug.html", "w", encoding="utf-8") as f:
-    f.write(html)
+        if html:
+            f.write(html)
+        else:
+            f.write("SIN HTML")
+    ### FIN DEL FIX ###
+
+    
 
     if not html:
         return None
