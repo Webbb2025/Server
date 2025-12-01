@@ -170,6 +170,9 @@ def get_product_info(url):
         return None
 
     html = scraperapi_get(url)
+    with open("debug.html", "w", encoding="utf-8") as f:
+    f.write(html)
+
     if not html:
         return None
 
