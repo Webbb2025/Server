@@ -29,12 +29,7 @@ PALABRAS_CLAVE = [
 ]
 
 MIN_DESCUENTO_PCT = 10
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
-]
+BLACK_FRIDAY_PCT = 30
 
 # ---------------- UTILIDADES ----------------
 def log(msg):
@@ -80,13 +75,8 @@ def registrar_envio(asin, historial):
     historial[asin] = datetime.now().isoformat()
     guardar_historial(hist)
 
-
 # ---------------- SCRAPING CON ZENROWS ----------------
 def scraperapi_get(url):
-    """Scraping antibloqueo usando ZenRows."""
-
-    headers = {"User-Agent": random.choice(USER_AGENTS)}
-
     api_url = (
         f"https://api.zenrows.com/v1/?apikey={ZENROWS_API_KEY}"
         f"&url={requests.utils.quote(url)}"
@@ -94,7 +84,7 @@ def scraperapi_get(url):
     )
 
     try:
-        r = requests.get(api_url, headers=headers, timeout=60)
+        r = requests.get(api_url, timeout=60)
         if r.status_code == 200:
             return r.text
 
@@ -105,12 +95,11 @@ def scraperapi_get(url):
         log(f"Error ZenRows GET {url}: {e}")
         return None
 
-
 # ---------------- PARSEO ----------------
 def parse_number_like_amazon(text):
     if not text:
         return None
-    text = text.replace("\xa0", "").replace("\u202f", "").replace("€", "").strip()
+    text = text.replace("\xa0", "").replace("\u202f", "").replace("€","").strip()
     text = text.replace(",", ".")
     try:
         return float(re.findall(r"[\d\.]+", text)[0])
@@ -118,10 +107,10 @@ def parse_number_like_amazon(text):
         return None
 
 def extraer_precios(soup):
-    precio_actual_tag = soup.select_one(".a-offscreen")
+    precio_actual_tag = soup.select_one(".aok-offscreen")
     precio_actual = parse_number_like_amazon(precio_actual_tag.get_text(strip=True)) if precio_actual_tag else None
 
-    precio_anterior_tag = soup.select_one(".a-text-price .a-offscreen")
+    precio_anterior_tag = soup.select_one(".a-price.a-text-price .a-offscreen")
     precio_anterior = parse_number_like_amazon(precio_anterior_tag.get_text(strip=True)) if precio_anterior_tag else None
 
     if precio_actual and precio_anterior:
@@ -131,11 +120,10 @@ def extraer_precios(soup):
 
     return precio_actual, precio_anterior, descuento
 
+# ---------------- ASIN/URL ----------------
 def extract_asin(url):
     try:
         m = re.search(r"/dp/([A-Z0-9]{10})", url)
-        if m: return m.group(1)
-        m = re.search(r"/gp/product/([A-Z0-9]{10})", url)
         if m: return m.group(1)
     except:
         return None
@@ -144,11 +132,11 @@ def extract_asin(url):
 def crear_url_afiliado(asin):
     return f"https://www.amazon.es/dp/{asin}?tag={TAG}&psc=1"
 
-
 # ---------------- BUSCAR PRODUCTOS ----------------
 def buscar_productos():
     keyword = random.choice(PALABRAS_CLAVE)
     pagina = random.randint(1, 3)
+
     log(f"🔎 Buscando '{keyword}' página {pagina}...")
 
     search_url = f"https://www.amazon.es/s?k={requests.utils.requote_uri(keyword)}&page={pagina}"
@@ -165,16 +153,15 @@ def buscar_productos():
 
     for a in enlaces:
         href = a.get("href", "")
-        if "/dp/" in href:
+        if href.startswith("/dp/"):
             asin = extract_asin(href)
             if asin:
                 urls.add("https://www.amazon.es" + href)
 
-    urls = sorted(urls)
+    urls = sorted(list(urls))
     log(f"URLs encontradas: {len(urls)}")
 
     return urls
-
 
 # ---------------- INFO PRODUCTO ----------------
 def get_product_info(url):
@@ -188,10 +175,10 @@ def get_product_info(url):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    titulo_tag = soup.select_one("#productTitle")
+    titulo_tag = soup.select_one("#productTitle") or soup.select_one("h1 span")
     titulo = titulo_tag.get_text(" ", strip=True) if titulo_tag else "Sin título"
 
-    imagen_tag = soup.select_one("#landingImage")
+    imagen_tag = soup.select_one("#landingImage") or soup.select_one("img.s-image")
     imagen = imagen_tag.get("src") if imagen_tag else None
 
     precio_actual, precio_anterior, descuento = extraer_precios(soup)
@@ -210,7 +197,6 @@ def get_product_info(url):
         "descuento": descuento,
         "url": crear_url_afiliado(asin),
     }
-
 
 # ---------------- TELEGRAM ----------------
 def enviar_telegram(producto):
@@ -238,7 +224,6 @@ def enviar_telegram(producto):
     except Exception as e:
         log(f"ERROR Telegram {producto['asin']}: {e}")
 
-
 # ---------------- BUCLE PRINCIPAL ----------------
 def main_loop():
     ensure_dirs()
@@ -251,24 +236,24 @@ def main_loop():
                 time.sleep(10)
                 continue
 
+            # ➜ SOLO UN ENVÍO CADA 10 MIN
             for url in urls:
                 p = get_product_info(url)
 
                 if p and not fue_enviado_recientemente(p["asin"], historial):
                     enviar_telegram(p)
                     registrar_envio(p["asin"], historial)
-                    log("⏳ Esperando 10 minutos...")
-                    time.sleep(600)
 
-            log("🔁 Ciclo completo. Pausa 10 min...\n")
-            time.sleep(600)
+                    log("⏳ Esperando 10 minutos para el siguiente envío...")
+                    time.sleep(600)
+                    break  # <--- Muy importante
 
         except Exception as e:
             log(f"ERROR inesperado: {e}")
             log(traceback.format_exc())
             time.sleep(30)
 
-
+# ---------------- MAIN ----------------
 if __name__ == "__main__":
-    log("🚀 Sistema Amazon iniciado con ZenRows (antibot activado).")
+    log("🚀 Sistema Amazon iniciado con ZenRows (1 envío cada 10 min).")
     main_loop()
