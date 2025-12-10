@@ -15,7 +15,8 @@ import re
 
 
 # ---------------- CONFIG ----------------
-TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
+#TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
+TELEGRAM_TOKEN  = "7711722254:AAFAscovZ44PJpbYuJHKVgFevSNy-himSc4"
 CHAT_ID = "-1002428790704"
 TAG = "crt06f-21"
 
