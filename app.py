@@ -17,7 +17,9 @@ import re
 # ---------------- CONFIG ----------------
 #TELEGRAM_TOKEN = "7711722254:AAFV4bj2aQtbVKpa1gkMUyqlhkCzytRoubg"
 TELEGRAM_TOKEN  = "7711722254:AAFAscovZ44PJpbYuJHKVgFevSNy-himSc4"
+#ofertas prime
 #CHAT_ID = "-1002428790704"
+#ofertas colegio
 CHAT_ID = "-1003179746715"
 TAG = "crt06f-21"
 
