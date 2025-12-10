@@ -19,8 +19,8 @@ import re
 TELEGRAM_TOKEN  = "7711722254:AAFAscovZ44PJpbYuJHKVgFevSNy-himSc4"
 #ofertas prime
 #CHAT_ID = "-1002428790704"
-#ofertas colegio
-CHAT_ID = "-1003179746715"
+#ofertas TOP prime 10
+CHAT_ID = "@TopPrime10"
 TAG = "crt06f-21"
 
 EXCEL_FILE = "productos.xlsx"
