@@ -33,10 +33,10 @@ NO_REPEAT_DAYS = 15
 PALABRAS_CLAVE = [
     "Hogar",
     "ropa",
-    "juguetes",
-    "juegos",
-    "bebé",
-    "deporte"
+    "television",
+    "Bricolaje",
+    "tablet",
+    "Belleza"
 ]
 
 HEADERS_ROTATIVOS = [
