@@ -335,8 +335,15 @@ def main_loop():
             log(traceback.format_exc())
             time.sleep(60)
 
+# if __name__ == "__main__":
+#    if not TELEGRAM_TOKEN or not CHAT_ID:
+#        log("⚠️ Atención: TELEGRAM_TOKEN o CHAT_ID no configurado.")
+#    log("🚀 Sistema Amazon iniciado (precio extraído de aok-offscreen, descuento calculado).")
+ #   main_loop()
+
 if __name__ == "__main__":
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        log("⚠️ Atención: TELEGRAM_TOKEN o CHAT_ID no configurado.")
-    log("🚀 Sistema Amazon iniciado (precio extraído de aok-offscreen, descuento calculado).")
-    main_loop()
+    print("⛔ Script deshabilitado. No se ejecuta ninguna acción.")
+    exit(0)
+
+
+
