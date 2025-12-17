@@ -136,11 +136,11 @@ def generar_mensaje_rotado(p, categoria):
     hora = datetime.now().hour
     intro_variants = CATEGORIAS.get(categoria, ["🔹 Oferta destacada:"])
     if 9 <= hora < 12:
-        intro = random.choice(intro_variants) + " 🌅"
+        intro = random.choice(intro_variants) + " "
     elif 12 <= hora < 18:
-        intro = random.choice(intro_variants) + " ☀️"
+        intro = random.choice(intro_variants) + " "
     else:
-        intro = random.choice(intro_variants) + " 🌙"
+        intro = random.choice(intro_variants) + " "
 
     price_variants = [
         f"💰 Precio ahora: {p['precio']} €",
@@ -272,4 +272,5 @@ def main_loop():
 
 if __name__ == "__main__":
     main_loop()
+
 
