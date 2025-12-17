@@ -44,7 +44,7 @@ HEADERS = [
 ]
 
 TAG_AFILIADO = "crt06f-21"
-HORA_INICIO = 8
+HORA_INICIO = 7
 HORA_FIN = 23
 
 HISTORIAL_FILE = "enviados_historial.json"
@@ -272,3 +272,4 @@ def main_loop():
 
 if __name__ == "__main__":
     main_loop()
+
