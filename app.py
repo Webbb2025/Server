@@ -16,9 +16,9 @@ import json
 MODO = "ULTRA"
 
 MODOS_CONFIG = {
-    "ULTRA": {"min_intervalo": 3600, "max_intervalo": 7200, "min_descuento": 7, "max_envios_dia": 10},
-    "SAFE": {"min_intervalo": 2700, "max_intervalo": 5400, "min_descuento": 5, "max_envios_dia": 20},
-    "NORMAL": {"min_intervalo": 1800, "max_intervalo": 3600, "min_descuento": 3, "max_envios_dia": 35}
+    "ULTRA": {"min_intervalo": 3100, "max_intervalo": 6200, "min_descuento": 7, "max_envios_dia": 10},
+    "SAFE": {"min_intervalo": 2200, "max_intervalo": 4400, "min_descuento": 5, "max_envios_dia": 20},
+    "NORMAL": {"min_intervalo": 1700, "max_intervalo": 3000, "min_descuento": 3, "max_envios_dia": 35}
 }
 
 CFG = MODOS_CONFIG[MODO]
@@ -32,7 +32,25 @@ CATEGORIAS = {
     "deporte": ["🏃‍♂️ Deportes y fitness:", "⚽ Ofertas deportivas:", "🏋️ Equipo de entrenamiento:"],
     "cocina": ["🍳 Cocina en oferta:", "🥘 Utensilios rebajados:", "🍴 Oferta culinaria:"],
     "bricolaje": ["🔨 Bricolaje y herramientas:", "🛠️ Herramientas en oferta:", "🏗️ DIY con descuento:"],
-    "oficina": ["📎 Oficina y papelería:", "🖋️ Productos de oficina rebajados:", "🗂️ Oferta para tu escritorio:"]
+    "oficina": ["📎 Oficina y papelería:", "🖋️ Productos de oficina rebajados:", "🗂️ Oferta para tu escritorio:"],
+
+"moda": ["👕 Moda en tendencia:", "👗 Ropa con descuento:", "🧥 Estilo en oferta:"],
+"belleza": ["💄 Belleza y cuidado personal:", "✨ Productos beauty rebajados:", "🧴 Cuídate por menos:"],
+"salud": ["🩺 Salud y bienestar:", "💊 Productos para cuidarte:", "🌿 Bienestar en oferta:"],
+"juguetes": ["🧸 Juguetes para peques:", "🎁 Diversión asegurada:", "🚀 Juguetes en oferta:"],
+"bebes": ["👶 Bebés y maternidad:", "🍼 Esenciales para tu bebé:", "💖 Ofertas para los más pequeños:"],
+"mascotas": ["🐶 Mascotas felices:", "🐱 Productos para tu mascota:", "🦴 Ofertas pet:"],
+"videojuegos": ["🎮 Videojuegos en oferta:", "🕹️ Gaming destacado:", "🔥 Ofertas gamer:"],
+"libros": ["📚 Libros recomendados:", "📖 Lecturas en oferta:", "✍️ Cultura a buen precio:"],
+"musica": ["🎶 Música y sonido:", "🎧 Accesorios musicales:", "🎼 Ritmo en oferta:"],
+"fotografia": ["📸 Fotografía y video:", "🎥 Accesorios para creadores:", "🖼️ Captura el momento:"],
+"automovil": ["🚗 Accesorios para tu coche:", "🛞 Automóvil en oferta:", "🧼 Cuida tu vehículo:"],
+"jardin": ["🌱 Jardín y exterior:", "🌳 Ideas para tu jardín:", "🌼 Exterior en oferta:"],
+"iluminacion": ["💡 Iluminación para el hogar:", "✨ Luces y lámparas:", "🔆 Brilla por menos:"],
+"seguridad": ["🔒 Seguridad para el hogar:", "📹 Protección y vigilancia:", "🚨 Tranquilidad en oferta:"]
+
+
+    
 }
 
 PALABRAS_CLAVE = list(CATEGORIAS.keys())
@@ -272,5 +290,6 @@ def main_loop():
 
 if __name__ == "__main__":
     main_loop()
+
 
 
